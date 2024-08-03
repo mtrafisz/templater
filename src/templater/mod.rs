@@ -229,10 +229,18 @@ impl Templater {
                 log::info!("Running command: {} {}", command, args.join(" "));
             }
 
-            let status = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(format!("{} {}", command, args.join(" ")))
-                .status()?;
+            let status = if cfg!(target_os = "windows") {
+                std::process::Command::new("cmd")
+                    .arg("/C")
+                    .arg(command)
+                    .args(args)
+                    .status()?
+            } else {
+                std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(format!("{} {}", command, args.join(" ")))
+                    .status()?
+            };
 
             if !status.success() {
                 return Err(Error::CreateTemplate(command.to_string()).into());

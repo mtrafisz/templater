@@ -6,7 +6,7 @@ Simple project template manager.
 
 ### Via Cargo
 
-You need:
+You'll need:
 - [rust toolchain](www.rust-lang.org/tools/install)
 - [git](git-scm.com/downloads)
 
@@ -27,8 +27,8 @@ templater create <path>
 Additional flags:
 - `-n`, `--name` - name of the template - this is how You'll later find it.
 - `-d`, `--description` - description of the template.
-- `-c`, `--command` - add command to template. Commands added to template will be run after creating file system in order they were added.
-- `-i`, `--ignore` - ignore files or directories. Ignore patterns are in standard unix glob format. For example `**/*.txt` will ignore all files with `.txt` extension.
+- `-c`, `--command` - add command to template. Commands added to template will be run after creating file system in order they were added. Can be used multiple times.
+- `-i`, `--ignore` - ignore files or directories. Ignore patterns are in standard unix glob format. For example `**/*.txt` will ignore all files with `.txt` extension. Can be used multiple times.
 - `-f`, `--force` - force overwrite existing template.
 
 ### Create a project from template
@@ -50,7 +50,7 @@ templater list
 
 Additional flags:
 - `-n`, `--name` - filter templates by name.
-- `-c`, `--command` - list commands of template. Is dependent on `-n` flag.
+- `-c`, `--commands` - list commands of template. Is dependent on `-n` flag.
 
 ### Remove template
 
