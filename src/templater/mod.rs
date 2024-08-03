@@ -4,24 +4,29 @@ use sled::Db;
 use anyhow::{Result, Context};
 use prettytable::{Table, Row, Cell};
 use pretty_bytes::converter::convert;
-use chrono::{format, DateTime, Local, TimeZone};
+use chrono::{Local, TimeZone};
 use walkdir::WalkDir;
 use tar::{Archive, Builder};
 use flate2::{Compression, write::GzEncoder, read::GzDecoder};
-use globset::{GlobBuilder, GlobMatcher, Glob, GlobSetBuilder};
+use globset::{GlobBuilder, GlobMatcher};
+use serde::{Deserialize, Serialize};
 
 use std::{
-    fs::File,
-    path::PathBuf,
-    time::SystemTime,
-    io::{self}
+    fs::File, io::{Read, Seek, Write}, path::PathBuf, time::SystemTime
 };
 
 pub mod error;
 use error::Error;
 
-mod template;
-use template::Template;
+#[derive(Debug, Serialize, Deserialize)]
+struct Template {
+    pub name: String,
+    pub description: Option<String>,
+    pub commands: Vec<String>,
+    pub compressed_size: u64,
+    pub created: SystemTime,
+    pub used: Option<SystemTime>,
+}
 
 pub struct Templater {
     command: Command,
@@ -55,14 +60,23 @@ impl Templater {
             Task::Create { path, name, description, commands, ignore, force } => {
                 self.create_template(path, name, description, commands, ignore, *force).context("Failed to create template")
             }
-            Task::Expand { name, path, create_as } => {
-                self.expand_template(name, path, create_as)
+            Task::Expand { name, path, create_as, no_exec } => {
+                self.expand_template(name, path, create_as, no_exec).context("Failed to expand template")
             }
-            Task::List { name } => {
-                self.list_templates(name.as_ref())
+            Task::List { name, commands } => {
+                if name.is_none() && *commands {
+                    return Err(Error::InvalidArgument("You can only list commands for a specific template, please provide --name".to_string()).into());
+                } else if !*commands {
+                    self.list_templates(name.as_ref())
+                } else {
+                    self.list_commands(name.as_ref().unwrap())
+                }
             }
             Task::Delete { name } => {
                 self.delete_template(name)
+            },
+            Task::Edit { name } => {
+                self.edit_template(name)
             }
         }
     }
@@ -126,7 +140,7 @@ impl Templater {
 
             table.add_row(Row::new(vec![
                 Cell::new(&template.name),
-                Cell::new(&template.description.unwrap_or_default()),
+                Cell::new(&template.description.unwrap_or("No description".to_string())),
                 Cell::new(&compressed_size),
                 Cell::new(&created_at),
                 Cell::new(&last_used),
@@ -142,7 +156,21 @@ impl Templater {
         Ok(())
     }
 
-    fn expand_template(&self, name: &str, path: &Option<PathBuf>, create_as: &Option<String>) -> Result<()> {
+    fn list_commands(&self, name: &str) -> Result<()> {
+        let template: Template = match self.db.get(name)? {
+            Some(data) => serde_json::from_slice(&data)?,
+            None => return Err(Error::TemplateNotFound(name.to_string()).into()),
+        };
+    
+        let commands = template.commands.iter().fold("Commands:".to_string(), |acc, command| {
+            format!("{}\n{}", acc, command)
+        });
+        log::info!("{}", commands);
+
+        Ok(())
+    }
+
+    fn expand_template(&self, name: &str, path: &Option<PathBuf>, create_as: &Option<String>, no_exec: &bool) -> Result<()> {
         let mut template: Template = match self.db.get(name)? {
             Some(data) => serde_json::from_slice(&data)?,
             None => return Err(Error::TemplateNotFound(name.to_string()).into()),
@@ -185,6 +213,10 @@ impl Templater {
             log::info!("Unpacked archive: {}", archive_path.display());
         }
 
+        if *no_exec {
+            return Ok(());
+        }
+
         let cwd = std::env::current_dir()?;
 
         std::env::set_current_dir(&new_path)?;
@@ -197,7 +229,6 @@ impl Templater {
                 log::info!("Running command: {} {}", command, args.join(" "));
             }
 
-            // sh -c "command args"
             let status = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(format!("{} {}", command, args.join(" ")))
@@ -296,7 +327,6 @@ impl Templater {
             description: description.clone(),
             commands: commands.clone(),
             compressed_size,
-            ignore: ignore.clone(),
             created: SystemTime::now(),
             used: None,
         };
@@ -311,6 +341,60 @@ impl Templater {
         if self.command.verbose {
             log::info!("Finished creating template: {}", name);
         }
+
+        Ok(())
+    }
+
+    fn edit_template(&self, name: &str) -> Result<()> {
+        let template: Template = match self.db.get(name)? {
+            Some(data) => serde_json::from_slice(&data)?,
+            None => return Err(Error::TemplateNotFound(name.to_string()).into()),
+        };
+
+        let editor = std::env::var("EDITOR").unwrap_or("vi".to_string());
+        let mut file = tempfile::NamedTempFile::new()?;
+        
+        #[derive(Serialize, Deserialize)]
+        struct TemplateEditFile {
+            name: String,
+            description: Option<String>,
+            commands: Vec<String>,
+        }
+
+        let template_edit_file = TemplateEditFile {
+            name: template.name.clone(),
+            description: template.description.clone(),
+            commands: template.commands.clone(),
+        };
+
+        file.write_all(serde_json::to_string_pretty(&template_edit_file)?.as_bytes())?;
+
+        let status = std::process::Command::new(editor)
+            .arg(file.path())
+            .status()?;
+        if !status.success() {
+            return Err(Error::EditTemplate("Failed to open editor".to_string()).into());
+        }
+
+        file.seek(std::io::SeekFrom::Start(0))?;
+        let mut contents = String::new();
+
+        file.read_to_string(&mut contents)?;
+
+        let template_edit: TemplateEditFile = serde_json::from_str(&contents)?;
+        let template = Template {
+            name: template_edit.name,
+            description: template_edit.description,
+            commands: template_edit.commands,
+            compressed_size: template.compressed_size,
+            created: template.created,
+            used: template.used,
+        };
+
+        self.db.insert(name, serde_json::to_vec(&template)?)?;
+
+        self.list_templates(Some(&template.name))?;
+        self.list_commands(&template.name)?;
 
         Ok(())
     }

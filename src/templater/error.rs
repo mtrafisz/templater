@@ -10,4 +10,8 @@ pub enum Error {
     TemplateExists(String),
     #[error("Failed to create template: {0}")]
     CreateTemplate(String),
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
+    #[error("Failed to edit template: {0}")]
+    EditTemplate(String),
 }

@@ -38,12 +38,19 @@ pub enum Task {
         path: Option<PathBuf>,
         #[arg(short = 'a', long = "as")]
         create_as: Option<String>,
+        #[arg(short, long)]
+        no_exec: bool,
     },
     List {
         #[arg(short, long)]
         name: Option<String>,
+        #[arg(short, long)]
+        commands: bool,
     },
     Delete {
+        name: String,
+    },
+    Edit {
         name: String,
     },
 }

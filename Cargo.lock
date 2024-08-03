@@ -944,6 +944,7 @@ dependencies = [
  "serde_json",
  "sled",
  "tar",
+ "tempfile",
  "thiserror",
  "walkdir",
 ]
