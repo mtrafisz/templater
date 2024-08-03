@@ -393,6 +393,10 @@ impl Templater {
 
         self.db.insert(name, serde_json::to_vec(&template)?)?;
 
+        let archive_path = self.storage_path.join("archives").join(format!("{}.tar.gz", name));
+        let new_archive_path = self.storage_path.join("archives").join(format!("{}.tar.gz", template.name));
+        std::fs::rename(archive_path, new_archive_path)?;
+
         self.list_templates(Some(&template.name))?;
         self.list_commands(&template.name)?;
 
