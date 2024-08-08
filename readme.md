@@ -40,6 +40,7 @@ templater expand <template_name>
 Additional flags:
 - `-a`, `--as` - name of the project. If not provided, name of the project will be the same as the template.
 - `-p`, `--path` - path where project will be created. If not provided, project will be created in current directory. Templaters are allways expanded to new, empty directory.
+- `-e` `--env` - add envirionment variable to be set, before running template commands. Value of this flag is expected to be "name=value". Can be used multiple times.
 - `-n`, `--no-exec` - do not execute commands from template.
 
 ### List templates
