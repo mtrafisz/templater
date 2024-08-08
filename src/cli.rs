@@ -36,6 +36,8 @@ pub enum Task {
         name: String,
         #[arg(short, long)]
         path: Option<PathBuf>,
+        #[arg(short, long = "env")]
+        envs: Vec<String>,  // --env key=value
         #[arg(short = 'a', long = "as")]
         create_as: Option<String>,
         #[arg(short, long)]

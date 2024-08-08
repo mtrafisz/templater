@@ -1,18 +1,18 @@
 use super::cli::{Command, Task};
 
-use sled::Db;
-use anyhow::{Result, Context};
-use prettytable::{Table, Row, Cell};
-use pretty_bytes::converter::convert;
+use anyhow::{Context, Result};
 use chrono::{Local, TimeZone};
-use walkdir::WalkDir;
-use tar::{Archive, Builder};
-use flate2::{Compression, write::GzEncoder, read::GzDecoder};
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use globset::{GlobBuilder, GlobMatcher};
+use pretty_bytes::converter::convert;
+use prettytable::{Cell, Row, Table};
 use serde::{Deserialize, Serialize};
+use sled::Db;
+use tar::{Archive, Builder};
+use walkdir::WalkDir;
 
 use std::{
-    fs::File, io::{Read, Seek, Write}, path::PathBuf, time::SystemTime
+    collections::HashMap, fs::File, io::{Read, Seek, Write}, path::PathBuf, time::SystemTime
 };
 
 pub mod error;
@@ -57,27 +57,40 @@ impl Templater {
 
     pub fn run(&mut self) -> Result<()> {
         match &self.command.task {
-            Task::Create { path, name, description, commands, ignore, force } => {
-                self.create_template(path, name, description, commands, ignore, *force).context("Failed to create template")
-            }
-            Task::Expand { name, path, create_as, no_exec } => {
-                self.expand_template(name, path, create_as, no_exec).context("Failed to expand template")
-            }
+            Task::Create {
+                path,
+                name,
+                description,
+                commands,
+                ignore,
+                force,
+            } => self
+                .create_template(path, name, description, commands, ignore, *force)
+                .context("Failed to create template"),
+            Task::Expand {
+                name,
+                path,
+                envs,
+                create_as,
+                no_exec,
+            } => self
+                .expand_template(name, path, envs, create_as, no_exec)
+                .context("Failed to expand template"),
             Task::List { name, commands } => {
                 if name.is_none() && *commands {
-                    return Err(Error::InvalidArgument("You can only list commands for a specific template, please provide --name".to_string()).into());
+                    return Err(Error::InvalidArgument(
+                        "You can only list commands for a specific template, please provide --name"
+                            .to_string(),
+                    )
+                    .into());
                 } else if !*commands {
                     self.list_templates(name.as_ref())
                 } else {
                     self.list_commands(name.as_ref().unwrap())
                 }
             }
-            Task::Delete { name } => {
-                self.delete_template(name)
-            },
-            Task::Edit { name } => {
-                self.edit_template(name)
-            }
+            Task::Delete { name } => self.delete_template(name),
+            Task::Edit { name } => self.edit_template(name),
         }
     }
 
@@ -89,7 +102,10 @@ impl Templater {
         if self.command.verbose {
             log::info!("Deleted template metadata: {}", name);
         }
-        let archive_path = self.storage_path.join("archives").join(format!("{}.tar.gz", name));
+        let archive_path = self
+            .storage_path
+            .join("archives")
+            .join(format!("{}.tar.gz", name));
         if archive_path.exists() {
             std::fs::remove_file(archive_path.clone())?;
             if self.command.verbose {
@@ -105,7 +121,7 @@ impl Templater {
         let db_iter = self.db.iter();
         let mut empty = true;
         let mut table = Table::new();
-        
+
         table.set_titles(Row::new(vec![
             Cell::new("Name"),
             Cell::new("Description"),
@@ -117,7 +133,7 @@ impl Templater {
         for item in db_iter {
             let (_key, value) = item?;
             let template: Template = serde_json::from_slice(&value)?;
-            
+
             if let Some(name) = name {
                 if name != &template.name {
                     continue;
@@ -126,15 +142,29 @@ impl Templater {
             empty = false;
 
             let compressed_size = convert(template.compressed_size as f64);
-            let created_at= Local.timestamp_opt(
-                template.created.duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap().as_secs() as i64, 0)
-                .unwrap().format("%Y-%m-%d %H:%M:%S").to_string();
+            let created_at = Local
+                .timestamp_opt(
+                    template
+                        .created
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i64,
+                    0,
+                )
+                .unwrap()
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string();
             let last_used = match template.used {
-                Some(time) => Local.timestamp_opt(
-                    time.duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap().as_secs() as i64, 0)
-                    .unwrap().format("%Y-%m-%d %H:%M:%S").to_string(),
+                Some(time) => Local
+                    .timestamp_opt(
+                        time.duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64,
+                        0,
+                    )
+                    .unwrap()
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string(),
                 None => "Never".to_string(),
             };
 
@@ -152,7 +182,7 @@ impl Templater {
         } else {
             table.printstd();
         }
-    
+
         Ok(())
     }
 
@@ -161,16 +191,26 @@ impl Templater {
             Some(data) => serde_json::from_slice(&data)?,
             None => return Err(Error::TemplateNotFound(name.to_string()).into()),
         };
-    
-        let commands = template.commands.iter().fold("Commands:".to_string(), |acc, command| {
-            format!("{}\n{}", acc, command)
-        });
+
+        let commands = template
+            .commands
+            .iter()
+            .fold("Commands:".to_string(), |acc, command| {
+                format!("{}\n{}", acc, command)
+            });
         log::info!("{}", commands);
 
         Ok(())
     }
 
-    fn expand_template(&self, name: &str, path: &Option<PathBuf>, create_as: &Option<String>, no_exec: &bool) -> Result<()> {
+    fn expand_template(
+        &self,
+        name: &str,
+        path: &Option<PathBuf>,
+        envs: &Vec<String>,
+        create_as: &Option<String>,
+        no_exec: &bool,
+    ) -> Result<()> {
         let mut template: Template = match self.db.get(name)? {
             Some(data) => serde_json::from_slice(&data)?,
             None => return Err(Error::TemplateNotFound(name.to_string()).into()),
@@ -178,7 +218,7 @@ impl Templater {
 
         template.used = Some(SystemTime::now());
         self.db.insert(name, serde_json::to_vec(&template)?)?;
-        let template = template;    // unmut
+        let template = template; // unmut
 
         let path = match path {
             Some(path) => path.clone(),
@@ -194,7 +234,10 @@ impl Templater {
             log::info!("Expanding template {} to {}", name, path.display());
         }
 
-        let archive_path = self.storage_path.join("archives").join(format!("{}.tar.gz", name));
+        let archive_path = self
+            .storage_path
+            .join("archives")
+            .join(format!("{}.tar.gz", name));
         let archive = File::open(&archive_path)?;
         let dec = GzDecoder::new(archive);
         let mut archive = Archive::new(dec);
@@ -229,16 +272,28 @@ impl Templater {
                 log::info!("Running command: {} {}", command, args.join(" "));
             }
 
+            let envs: HashMap<String, String> = envs
+                .iter()
+                .map(|env| {
+                    let mut parts = env.split("=");
+                    let key = parts.next().unwrap();
+                    let value = parts.collect::<Vec<&str>>().join("=");
+                    (key.to_string(), value)
+                })
+                .collect();
+
             let status = if cfg!(target_os = "windows") {
                 std::process::Command::new("cmd")
                     .arg("/C")
                     .arg(command)
                     .args(args)
+                    .envs(envs.iter())
                     .status()?
             } else {
                 std::process::Command::new("sh")
                     .arg("-c")
                     .arg(format!("{} {}", command, args.join(" ")))
+                    .envs(envs.iter())
                     .status()?
             };
 
@@ -251,14 +306,26 @@ impl Templater {
         Ok(())
     }
 
-    fn create_template(&self, path: &PathBuf, name: &Option<String>, description: &Option<String>, commands: &Vec<String>, ignore: &Vec<String>, force: bool) -> Result<()> {
+    fn create_template(
+        &self,
+        path: &PathBuf,
+        name: &Option<String>,
+        description: &Option<String>,
+        commands: &Vec<String>,
+        ignore: &Vec<String>,
+        force: bool,
+    ) -> Result<()> {
         if !path.exists() || !path.is_dir() {
             return Err(Error::InvalidTemplateDir(path.clone()).into());
         }
 
         let name = match name {
             Some(name) => name.clone(),
-            None => path.file_name().context("Failed to get file name")?.to_string_lossy().to_string(),
+            None => path
+                .file_name()
+                .context("Failed to get file name")?
+                .to_string_lossy()
+                .to_string(),
         };
 
         if self.db.contains_key(&name)? && !force {
@@ -269,10 +336,16 @@ impl Templater {
             log::info!("Creating archive file for template: {}", name);
         }
 
-        let archive_path = self.storage_path.join("archives").join(format!("{}.tar.gz", name));
+        let archive_path = self
+            .storage_path
+            .join("archives")
+            .join(format!("{}.tar.gz", name));
         std::fs::create_dir_all(&archive_path.parent().unwrap())?;
         if self.command.verbose {
-            log::info!("Creted archive directory: {}", archive_path.parent().unwrap().display());
+            log::info!(
+                "Creted archive directory: {}",
+                archive_path.parent().unwrap().display()
+            );
         }
 
         let tarball = File::create(&archive_path).context("Failed to create archive")?;
@@ -283,16 +356,18 @@ impl Templater {
         let enc = GzEncoder::new(tarball, Compression::default());
         let mut tar = Builder::new(enc);
 
-        let ignore_list = ignore.iter()
+        let ignore_list = ignore
+            .iter()
             .map(|pattern| {
                 let mut builder = GlobBuilder::new(pattern);
                 builder.case_insensitive(true);
-                builder.build()
+                builder
+                    .build()
                     .context(format!("Failed to build glob pattern: {}", pattern))
                     .map(|glob| glob.compile_matcher())
             })
             .collect::<Result<Vec<GlobMatcher>>>()?;
-        
+
         if self.command.verbose {
             log::info!("Filtering files with ignore patterns: {:?}", ignore);
         }
@@ -302,7 +377,9 @@ impl Templater {
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path().to_path_buf())
             .filter(|path| {
-                !ignore_list.iter().any(|matcher| matcher.is_match(path.to_str().unwrap()))
+                !ignore_list
+                    .iter()
+                    .any(|matcher| matcher.is_match(path.to_str().unwrap()))
             });
 
         for file_path in file_path_list {
@@ -313,7 +390,8 @@ impl Templater {
             }
 
             if file_path.is_file() {
-                let mut file = File::open(&file_path).context(format!("Failed to open file: {}", file_path.display()))?;
+                let mut file = File::open(&file_path)
+                    .context(format!("Failed to open file: {}", file_path.display()))?;
                 tar.append_file(relative_path, &mut file)?;
             } else {
                 tar.append_dir(relative_path, &file_path)?;
@@ -327,7 +405,10 @@ impl Templater {
             log::info!("Finished creating archive: {}", archive_path.display());
         }
 
-        let metadata = std::fs::metadata(&archive_path).context(format!("Failed to get metadata: {}", archive_path.display()))?;
+        let metadata = std::fs::metadata(&archive_path).context(format!(
+            "Failed to get metadata: {}",
+            archive_path.display()
+        ))?;
         let compressed_size = metadata.len();
 
         let template = Template {
@@ -361,7 +442,7 @@ impl Templater {
 
         let editor = std::env::var("EDITOR").unwrap_or("vi".to_string());
         let mut file = tempfile::NamedTempFile::new()?;
-        
+
         #[derive(Serialize, Deserialize)]
         struct TemplateEditFile {
             name: String,
@@ -401,8 +482,14 @@ impl Templater {
 
         self.db.insert(name, serde_json::to_vec(&template)?)?;
 
-        let archive_path = self.storage_path.join("archives").join(format!("{}.tar.gz", name));
-        let new_archive_path = self.storage_path.join("archives").join(format!("{}.tar.gz", template.name));
+        let archive_path = self
+            .storage_path
+            .join("archives")
+            .join(format!("{}.tar.gz", name));
+        let new_archive_path = self
+            .storage_path
+            .join("archives")
+            .join(format!("{}.tar.gz", template.name));
         std::fs::rename(archive_path, new_archive_path)?;
 
         self.list_templates(Some(&template.name))?;
