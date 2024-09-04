@@ -63,9 +63,10 @@ impl Templater {
                 description,
                 commands,
                 ignore,
+                definition_file,
                 force,
             } => self
-                .create_template(path, name, description, commands, ignore, *force)
+                .create_template(path, name, description, commands, ignore, definition_file, *force)
                 .context("Failed to create template"),
             Task::Expand {
                 name,
@@ -313,20 +314,135 @@ impl Templater {
         description: &Option<String>,
         commands: &Vec<String>,
         ignore: &Vec<String>,
+        definition: &Option<PathBuf>,
         force: bool,
     ) -> Result<()> {
         if !path.exists() || !path.is_dir() {
             return Err(Error::InvalidTemplateDir(path.clone()).into());
         }
 
-        let name = match name {
-            Some(name) => name.clone(),
-            None => path
-                .file_name()
-                .context("Failed to get file name")?
-                .to_string_lossy()
-                .to_string(),
+        /* The most discusting code I've ever written is here */
+
+        // definition parsing
+        #[derive(Serialize, Deserialize)]
+        struct TemplateDefinition {
+            name: Option<String>,
+            description: Option<String>,
+            commands: Vec<String>,
+            ignore: Vec<String>
+        }
+
+        impl TemplateDefinition {
+            fn load_template_definition(path: &PathBuf) -> Option<Self> {
+                let def_file = std::fs::File::open(path);
+                match def_file {
+                    Err(e) => {
+                        log::error!("Couldn't open definition file {}: {e}", path.display());
+                        return None;
+                    }
+                    Ok(mut f) => {
+                        let mut contents = String::new();
+                        if let Err(e) = f.read_to_string(&mut contents) {
+                            log::error!("Couldn't read from definition file: {e}");
+                            return None;
+                        }
+
+                        match serde_json::from_str(&contents) {
+                            Ok(template_def) => Some(template_def),
+                            Err(e) => {
+                                eprintln!("Provided file is not valid definition file: {e}");
+                                None
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let definition_contents = {
+            match definition {
+                None => {None},
+                Some(d) => {
+                    TemplateDefinition::load_template_definition(d)
+                }
+            }
         };
+
+        let config = match definition_contents {
+            Some(d) => {
+                let name = match name {
+                    Some(n) => n.clone(),
+                    None => {
+                        match d.name {
+                            Some(n) => n.clone(),
+                            None => {
+                                path
+                                .file_name()
+                                .context("Failed to get file name")?
+                                .to_string_lossy()
+                                .to_string()
+                            }
+                        }
+                    }
+                };
+
+                let description = match description {
+                    Some(desc) => Some(desc.clone()),
+                    None => {
+                        match d.description {
+                            Some(desc) => Some(desc.clone()),
+                            None => None
+                        }
+                    }
+                };
+
+                let commands = {
+                    if commands.len() == 0 && d.commands.len() != 0 {
+                        d.commands
+                    } else {
+                        commands.to_vec()
+                    }
+                };
+
+                let ignore = {
+                    if ignore.len() == 0 && d.ignore.len() != 0 {
+                        d.ignore
+                    } else {
+                        ignore.to_vec()
+                    }
+                };
+
+                TemplateDefinition {
+                    name: Some(name),
+                    description,
+                    commands,
+                    ignore,
+                }
+            },
+            None => {
+                let name = match name {
+                    Some(n) => n.clone(),
+                    None => {
+                        path
+                        .file_name()
+                        .context("Failed to get file name")?
+                        .to_string_lossy()
+                        .to_string()
+                    }
+                };
+
+                TemplateDefinition {
+                    name: Some(name),
+                    description: description.clone(),
+                    commands: commands.clone(),
+                    ignore: ignore.clone(),
+                }
+            }
+        };
+
+        /* End of very very bad code */
+
+        let name = config.name.unwrap();
 
         if self.db.contains_key(&name)? && !force {
             return Err(Error::TemplateExists(name).into());
@@ -356,7 +472,7 @@ impl Templater {
         let enc = GzEncoder::new(tarball, Compression::default());
         let mut tar = Builder::new(enc);
 
-        let ignore_list = ignore
+        let ignore_list = config.ignore
             .iter()
             .map(|pattern| {
                 let mut builder = GlobBuilder::new(pattern);
@@ -413,8 +529,8 @@ impl Templater {
 
         let template = Template {
             name: name.clone(),
-            description: description.clone(),
-            commands: commands.clone(),
+            description: config.description.clone(),
+            commands: config.commands.clone(),
             compressed_size,
             created: SystemTime::now(),
             used: None,

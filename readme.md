@@ -29,6 +29,7 @@ Additional flags:
 - `-d`, `--description` - description of the template.
 - `-c`, `--command` - add command to template. Commands added to template will be run after creating file system in order they were added. Can be used multiple times.
 - `-i`, `--ignore` - ignore files or directories. Ignore patterns are in standard unix glob format. For example `**/*.txt` will ignore all files with `.txt` extension. Can be used multiple times.
+- `-r`, `--definition` - provide definition file, instead of typing all template options in one command. See [example definition](examples/raylib-template.tplt)
 - `-f`, `--force` - force overwrite existing template.
 
 ### Create a project from template
@@ -59,8 +60,17 @@ Additional flags:
 templater delete <template_name>
 ```
 
-### Edit template
+### Edit template metadata
 
 ```bash
 templater edit <template_name>
 ```
+
+This will open text editor from your `$EDITOR` variable, or `vim` if its empty.
+You can change template name
+
+## TODO / Ideas
+
+- ~~some kind of definition file, that can be used instead of command-line arguments.~~ Done? TODO: fix me gagging everytime I see the code I've wrote to make this work.
+- list template file structure
+- change list subcommand to display commands whne --name is provided - remove -c flag

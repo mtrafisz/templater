@@ -12,6 +12,7 @@ pub struct Command {
 }
 
 impl Command {
+    // to avoid importing clap::Parser in main file
     pub fn clap_parse() -> Self {
         Command::parse()
     }
@@ -29,6 +30,8 @@ pub enum Task {
         commands: Vec<String>,
         #[arg(short, long)]
         ignore: Vec<String>,
+        #[arg(short='r', long="definition")]
+        definition_file: Option<PathBuf>,
         #[arg(short, long)]
         force: bool,
     },

@@ -1,0 +1,10 @@
+{
+    "name": "raylib-template",
+    "description": "raylib + CMake template",
+    "commands": [
+        "git init",
+        "git submodule add git submodule add --depth=1 https://github.com/raysan5/raylib.git third-party/raylib",
+        "cmake -S . -B build"
+    ],
+    "ignore": []
+}
