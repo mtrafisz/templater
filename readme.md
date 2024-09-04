@@ -67,7 +67,6 @@ templater edit <template_name>
 ```
 
 This will open text editor from your `$EDITOR` variable, or `vim` if its empty.
-You can change template name
 
 ## TODO / Ideas
 
