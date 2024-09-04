@@ -94,12 +94,6 @@ impl Templater {
                     .into());
                 }
 
-                // else if !*commands {
-                //     self.list_templates(name.as_ref())
-                // } else {
-                //     self.list_commands(name.as_ref().unwrap())
-                // }
-
                 self.list_templates(name.as_ref())?;
                 if *commands {
                     self.list_commands(name.as_ref().unwrap())?;
@@ -155,7 +149,7 @@ impl Templater {
             let template: Template = serde_json::from_slice(&value)?;
 
             if let Some(name) = name {
-                if name != &template.name {
+                if !template.name.contains(name) {
                     continue;
                 }
             }
