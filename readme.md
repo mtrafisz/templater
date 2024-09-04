@@ -52,7 +52,8 @@ templater list
 
 Additional flags:
 - `-n`, `--name` - filter templates by name.
-- `-c`, `--commands` - list commands of template. Is dependent on `-n` flag.
+- `-c`, `--commands` - list commands of template. Is dependent on `-n` argument.
+- `-t`, `--tree` - show file tree of the template.Is dependent on `-n` argument.
 
 ### Remove template
 
@@ -72,5 +73,4 @@ You can change template name
 ## TODO / Ideas
 
 - ~~some kind of definition file, that can be used instead of command-line arguments.~~ Done? TODO: fix me gagging everytime I see the code I've wrote to make this work.
-- list template file structure
-- change list subcommand to display commands whne --name is provided - remove -c flag
+- ~~list template file structure~~ Done. TODO: Check if I can remove `print_tar_tree` beast of a function.

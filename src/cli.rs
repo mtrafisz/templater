@@ -51,6 +51,8 @@ pub enum Task {
         name: Option<String>,
         #[arg(short, long)]
         commands: bool,
+        #[arg(short='t', long="tree")]
+        file_tree: bool
     },
     Delete {
         name: String,

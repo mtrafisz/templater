@@ -77,18 +77,37 @@ impl Templater {
             } => self
                 .expand_template(name, path, envs, create_as, no_exec)
                 .context("Failed to expand template"),
-            Task::List { name, commands } => {
+            Task::List { name, commands, file_tree } => {
                 if name.is_none() && *commands {
                     return Err(Error::InvalidArgument(
                         "You can only list commands for a specific template, please provide --name"
                             .to_string(),
                     )
                     .into());
-                } else if !*commands {
-                    self.list_templates(name.as_ref())
-                } else {
-                    self.list_commands(name.as_ref().unwrap())
                 }
+
+                if name.is_none() && *file_tree {
+                    return Err(Error::InvalidArgument(
+                        "You can only display file tree for a specific template, please provide --name"
+                            .to_string(),
+                    )
+                    .into());
+                }
+
+                // else if !*commands {
+                //     self.list_templates(name.as_ref())
+                // } else {
+                //     self.list_commands(name.as_ref().unwrap())
+                // }
+
+                self.list_templates(name.as_ref())?;
+                if *commands {
+                    self.list_commands(name.as_ref().unwrap())?;
+                }
+                if *file_tree {
+                    self.show_file_tree(name.as_ref().unwrap())?;
+                }
+                Ok(())
             }
             Task::Delete { name } => self.delete_template(name),
             Task::Edit { name } => self.edit_template(name),
@@ -202,6 +221,73 @@ impl Templater {
         log::info!("{}", commands);
 
         Ok(())
+    }
+
+    // TODO: This should not be in this project, isn't there any crate that can do that for me?
+    fn print_tar_tree<R: std::io::Read>(archive: &mut Archive<R>) -> Result<()> {
+        let mut dir_stack = vec![("".to_string(), 0)];
+        let mut last_depth = 0;
+        let mut is_first_entry = true;
+    
+        let entries: Vec<_> = archive.entries()?.collect();
+        let total_entries = entries.len();
+    
+        for (i, entry_result) in entries.into_iter().enumerate() {
+            let entry = entry_result?;
+            let path = entry.path()?;
+            let depth = path.components().count();
+    
+            while let Some((_, stack_depth)) = dir_stack.last() {
+                if *stack_depth >= depth {
+                    dir_stack.pop();
+                } else {
+                    break;
+                }
+            }
+    
+            let file_name = path.file_name().unwrap_or_else(|| path.as_os_str()).to_string_lossy();
+    
+            let def_prefix = &(String::new(), 0);
+            let (prefix, _) = dir_stack.last().unwrap_or(&def_prefix);
+            let connector = if i == total_entries - 1 || (depth != last_depth && !is_first_entry) {
+                "└── "
+            } else {
+                "├── "
+            };
+    
+            if is_first_entry {
+                println!("{}", file_name);
+                is_first_entry = false;
+            } else {
+                println!("{}{}{}", prefix, connector, file_name);
+            }
+    
+            if entry.header().entry_type().is_dir() {
+                let next_prefix = if i == total_entries - 1 || (depth != last_depth) {
+                    format!("{}    ", prefix)
+                } else {
+                    format!("{}│   ", prefix)
+                };
+                dir_stack.push((next_prefix, depth));
+            }
+    
+            last_depth = depth;
+        }
+        Ok(())
+    }
+
+    fn show_file_tree(&self, name: &str) -> Result<()> {
+        let archive_path = self
+            .storage_path
+            .join("archives")
+            .join(format!("{}.tar.gz", name));
+        let archive_file = std::fs::File::open(archive_path)?;
+
+        let decoder = GzDecoder::new(archive_file);
+        let mut archive = Archive::new(decoder);
+
+        log::info!("File Tree");
+        Self::print_tar_tree(&mut archive)
     }
 
     fn expand_template(
